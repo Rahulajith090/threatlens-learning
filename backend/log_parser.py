@@ -88,3 +88,60 @@ def parse_log(line):
         "src_port": src_port,
         "dst_port": dst_port,
     }
+
+
+def parse_auth_log(line):
+    """
+    Parses a single raw Linux authentication log line (SSH / sudo).
+
+    Example inputs:
+    - 'Jan 24 10:20:01 server sshd[1234]: Failed password for invalid user admin from 10.0.0.5 port 45123 ssh2'
+    - 'Jan 24 10:21:00 server sshd[1240]: Accepted password for analyst from 192.168.1.50 port 51234 ssh2'
+    - 'Jan 24 10:22:10 server sudo: analyst : TTY=pts/0 ; PWD=/home/analyst ; USER=root ; COMMAND=/bin/systemctl restart ufw'
+
+    Returns:
+        dict: A structured dictionary with extracted authentication fields if valid.
+        None: If the line is malformed or not an authentication event.
+    """
+    cleaned_line = line.strip()
+    if not cleaned_line:
+        return None
+
+    # 1. Extract timestamp
+    timestamp_match = re.search(r"^([A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2})", cleaned_line)
+    if not timestamp_match:
+        return None
+    timestamp = timestamp_match.group(1)
+
+    # 2. Check for SSH Failed password
+    ssh_failed = re.search(r"sshd\[\d+\]:\s+Failed password for (?:invalid user\s+)?(\S+)\s+from\s+([0-9.]+)", cleaned_line)
+    if ssh_failed:
+        return {
+            "timestamp": timestamp,
+            "action": "FAILED_LOGIN",
+            "username": ssh_failed.group(1),
+            "src_ip": ssh_failed.group(2),
+        }
+
+    # 3. Check for SSH Accepted password
+    ssh_accepted = re.search(r"sshd\[\d+\]:\s+Accepted password for\s+(\S+)\s+from\s+([0-9.]+)", cleaned_line)
+    if ssh_accepted:
+        return {
+            "timestamp": timestamp,
+            "action": "SUCCESSFUL_LOGIN",
+            "username": ssh_accepted.group(1),
+            "src_ip": ssh_accepted.group(2),
+        }
+
+    # 4. Check for sudo command execution
+    sudo_match = re.search(r"sudo:\s+(\S+)\s+:.*COMMAND=(.+)", cleaned_line)
+    if sudo_match:
+        return {
+            "timestamp": timestamp,
+            "action": "SUDO_COMMAND",
+            "username": sudo_match.group(1),
+            "src_ip": None,
+        }
+
+    # Line did not match known authentication patterns
+    return None
