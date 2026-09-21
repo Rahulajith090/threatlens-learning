@@ -12,7 +12,7 @@ Welcome to the **ThreatLens Learning Journey** repository. This repository docum
 
 - [x] **Day 1 — Firewall Log Parsing**
 - [x] **Day 2 — Log Normalization**
-- [ ] **Day 3 — Security Event Analysis**
+- [x] **Day 3 — Security Event Analysis**
 - [ ] **Day 4 — Attack Detection**
 - [ ] **Day 5 — Risk Scoring**
 - [ ] **Day 6 — Threat Intelligence**
@@ -151,7 +151,7 @@ Every normalized event in ThreatLens adheres to this structure:
 | `dst_ip` | `str` or `None` | Target destination IP address | Yes | `None` |
 | `src_port` | `int` or `None` | Source port integer | Yes | `None` |
 | `dst_port` | `int` or `None` | Destination port integer | Yes | `None` |
-| `protocol` | `str` or `None` | Network protocol (`"TCP"`, `"UDP"`) | Yes | `None` |
+| `protocol` | `str` or `None` | Network transport protocol (`"TCP"`, `"UDP"`) | Yes | `None` |
 | `action` | `str` | Outcome/decision (`"BLOCK"`, `"FAILED_LOGIN"`, etc.) | Yes | Yes |
 | `username` | `str` or `None` | User identity involved in the event | `None` | Yes |
 | `raw_log` | `str` or `None` | Preserved original raw log line for forensics | Yes | Yes |
@@ -231,28 +231,152 @@ Every normalized event in ThreatLens adheres to this structure:
 
 ---
 
+## 📊 Day 3 — Security Event Analysis
+
+### The Concept
+Once logs are parsed into structured data (Day 1) and normalized into a unified schema (Day 2), a SOC receives a continuous stream of canonical events.
+
+Before jumping into writing attack detection rules, an analyst or automated pipeline needs to perform **Security Event Analysis**. Analysis computes aggregate statistics, baseline metrics, and operational summaries across events to answer the question:
+
+> *"What is happening across our environment right now?"*
+
+### Critical SOC Principle: Analysis ≠ Detection
+
+Understanding the distinction between these two stages is essential for cybersecurity engineers:
+
+```
++-------------------------------------------------------------------------+
+|                               PARSING (Day 1)                           |
+|                  "Extract information from a raw log."                  |
++-------------------------------------------------------------------------+
+                                    ↓
++-------------------------------------------------------------------------+
+|                            NORMALIZATION (Day 2)                        |
+|       "Convert different log formats into a common structure."         |
++-------------------------------------------------------------------------+
+                                    ↓
++-------------------------------------------------------------------------+
+|                              ANALYSIS (Day 3)                           |
+|       "Calculate statistics and summarize what is happening."          |
+|                                                                         |
+|  Asks: "What is happening?"                                             |
+|  Example: "10.0.0.5 generated 10 events across ports 22, 80, and 8080."|
++-------------------------------------------------------------------------+
+                                    ↓
++-------------------------------------------------------------------------+
+|                             DETECTION (Day 4)                           |
+|                     "Identify suspicious behavior."                     |
+|                                                                         |
+|  Asks: "Does this behavior match a known suspicious pattern?"           |
+|  Example: "10.0.0.5 attempted 30 SSH logins in 2 minutes (Brute Force)" |
++-------------------------------------------------------------------------+
+```
+
+- **Analysis** observes and quantifies reality without passing judgment.
+- **Detection** applies security logic, signatures, and thresholds to decide if an observation constitutes an attack.
+
+---
+
+### Key Questions Answered by Security Event Analysis
+
+1. **Top Source IPs**: Which IP address generates the most events?
+2. **Top Destination Ports**: Which services (SSH=22, HTTP=80, HTTPS=443, DNS=53) are receiving the highest volume of traffic?
+3. **Protocol Distribution**: What is the ratio between TCP and UDP traffic?
+4. **Action Breakdown**: How many events resulted in `BLOCK` vs `ALLOW` vs `FAILED_LOGIN`?
+5. **Unique Entities**: How many distinct source IPs are communicating on our network?
+6. **Port Diversity per Host**: Which source IPs are contacting many distinct destination ports?
+
+---
+
+### Functions Implemented in `backend/analyzer.py`
+
+| Function | Purpose | Example Return Value |
+|---|---|---|
+| `get_top_source_ips(events, top_n=None)` | Ranks source IPs by activity count | `[("10.0.0.5", 10), ("10.0.0.8", 4)]` |
+| `get_top_destination_ports(events, top_n=None)` | Ranks target ports by connection attempts | `[(22, 6), (80, 5), (443, 3)]` |
+| `get_protocol_stats(events)` | Computes protocol distribution | `{"TCP": 15, "UDP": 3}` |
+| `get_action_stats(events)` | Tallies firewall & auth decisions | `{"BLOCK": 10, "ALLOW": 8, "FAILED_LOGIN": 6}` |
+| `get_unique_source_ips(events)` | Returns set of all unique source IPs | `{"10.0.0.5", "10.0.0.8", ...}` |
+| `get_unique_source_ip_count(events)` | Returns integer count of unique IPs | `8` |
+| `get_event_type_stats(events)` | Categorizes events by type | `{"network": 18, "authentication": 9}` |
+| `get_ports_per_source_ip(events)` | Maps source IP to contacted ports | `{"10.0.0.5": {22, 80, 8080}}` |
+| `analyze_events(events)` | Consolidates all stats into one summary dict | `{ "total_events": 27, ... }` |
+| `format_analysis_report(events)` | Formats clean human-readable text report | Formatted string for SOC analysts |
+
+---
+
+### Example Analysis Output
+
+When `backend/main.py` processes normalized events, it generates this live summary:
+
+```text
+=============================
+THREATLENS DAY 3 ANALYSIS
+=============================
+
+Top Source IPs:
+10.0.0.5 -> 10 events
+10.0.0.8 -> 4 events
+192.168.1.50 -> 4 events
+192.168.1.10 -> 3 events
+185.34.22.10 -> 2 events
+45.33.32.156 -> 1 events
+10.0.0.12 -> 1 events
+172.16.0.40 -> 1 events
+
+Top Destination Ports:
+22 -> 6
+80 -> 5
+443 -> 3
+53 -> 2
+8080 -> 1
+123 -> 1
+
+Protocol Statistics:
+TCP -> 15
+UDP -> 3
+
+Action Statistics:
+BLOCK -> 10
+ALLOW -> 8
+FAILED_LOGIN -> 6
+SUCCESSFUL_LOGIN -> 2
+SUDO_COMMAND -> 1
+
+Unique Source IPs:
+8
+
+Event Types:
+network -> 18
+authentication -> 9
+```
+
+---
+
 ## 📂 Project Structure
 
 ```
 threatlens-learning/
 │
-├── README.md                   # 10-day roadmap, Day 1 & Day 2 explanations
+├── README.md                   # 10-day roadmap, Day 1, Day 2 & Day 3 explanations
 ├── .gitignore                  # Python bytecode and cache ignores
 │
 ├── backend/
-│   ├── __init__.py             # Module exports
-│   ├── log_parser.py           # Day 1 & Auth log regex extraction functions
-│   ├── normalizer.py           # Day 2 normalization schema, mapping & validation
-│   └── main.py                 # Multi-source ingestion & normalization pipeline demo
+│   ├── __init__.py             # Module exports (Day 1, Day 2, Day 3)
+│   ├── log_parser.py           # Day 1 regex parsing (firewall & auth)
+│   ├── normalizer.py           # Day 2 canonical schema mapping & validation
+│   ├── analyzer.py             # Day 3 security event statistical analysis
+│   └── main.py                 # Multi-source pipeline demo (Parse -> Normalize -> Analyze)
 │
 ├── logs/
 │   ├── sample_auth.log         # Realistic synthetic Linux authentication logs
-│   └── sample_firewall.log     # Realistic UFW sample logs (valid + malformed)
+│   └── sample_firewall.log     # Realistic synthetic UFW firewall logs
 │
 └── tests/
     ├── __init__.py             # Test package marker
     ├── test_day1_parser.py     # Day 1 parser unit tests
-    └── test_day2_normalizer.py # Day 2 normalization unit tests
+    ├── test_day2_normalizer.py # Day 2 normalization unit tests
+    └── test_day3_analyzer.py   # Day 3 event analysis unit tests
 ```
 
 ---
@@ -261,17 +385,18 @@ threatlens-learning/
 
 Make sure you have Python 3 installed. No external libraries or third-party packages are needed.
 
-### 1. Run the Ingestion & Normalization Pipeline Demo
+### 1. Run the Full Security Pipeline Demo
 ```bash
 python3 backend/main.py
 ```
-This executes the end-to-end pipeline:
-- Ingests `logs/sample_firewall.log` and `logs/sample_auth.log`.
-- Shows each raw log line, its parsed intermediate dictionary, and the finalized canonical normalized event.
-- Displays summary statistics for valid vs. invalid lines.
+This executes the 3-stage pipeline:
+1. Ingests raw lines from `logs/sample_firewall.log` and `logs/sample_auth.log`.
+2. Parses each line into intermediate dictionaries and validates them.
+3. Normalizes each event into the canonical security event format.
+4. Analyzes all normalized events and outputs the **ThreatLens Day 3 Analysis** statistics report.
 
-### 2. Run the Automated Unit Tests
+### 2. Run All Automated Unit Tests
 ```bash
 python3 -m unittest discover -s tests -v
 ```
-All unit tests for both Day 1 (parsing) and Day 2 (normalization) execute automatically.
+Runs all 21 unit tests across Day 1 (parsing), Day 2 (normalization), and Day 3 (security event analysis).
