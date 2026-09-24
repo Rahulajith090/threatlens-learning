@@ -13,7 +13,7 @@ Welcome to the **ThreatLens Learning Journey** repository. This repository docum
 - [x] **Day 1 — Firewall Log Parsing**
 - [x] **Day 2 — Log Normalization**
 - [x] **Day 3 — Security Event Analysis**
-- [ ] **Day 4 — Attack Detection**
+- [x] **Day 4 — Attack Detection**
 - [ ] **Day 5 — Risk Scoring**
 - [ ] **Day 6 — Threat Intelligence**
 - [ ] **Day 7 — MITRE ATT&CK**
@@ -353,20 +353,157 @@ authentication -> 9
 
 ---
 
+## 🎯 Day 4 — Attack Detection
+
+### The Concept
+After parsing raw logs (Day 1), normalizing disparate formats into a canonical schema (Day 2), and calculating baseline statistics (Day 3), the security pipeline performs **Attack Detection**.
+
+While Day 3 Security Event Analysis asks:
+> *"What is happening across our environment?"*
+
+Day 4 Attack Detection asks:
+> *"Does the observed behavior match a suspicious or malicious pattern?"*
+
+### Pipeline Distinction: Parsing vs. Normalization vs. Analysis vs. Detection
+
+Understanding where Detection sits in the security lifecycle is fundamental for security operations:
+
+| Pipeline Stage | Question Asked | What It Does | Example |
+|---|---|---|---|
+| **Parsing (Day 1)** | *"What information is inside this log?"* | Uses regex to extract attributes from raw unstructured text | Extracts `src_ip=10.0.0.50`, `dst_port=22` |
+| **Normalization (Day 2)** | *"How do we represent different logs consistently?"* | Maps diverse vendor fields into a standardized schema | Standardizes firewall and auth logs into common keys |
+| **Analysis (Day 3)** | *"What is happening in the collected events?"* | Aggregates and summarizes event metrics without judgment | `10.0.0.50` contacted 7 destination ports |
+| **Detection (Day 4)** | *"Does the behavior match a suspicious pattern?"* | Compares events against attack signatures and thresholds | `10.0.0.50` contacted 7 ports (>= threshold 5) → **ALERT** |
+
+> **Critical SOC Principle**: A detection alert is **NOT** automatic proof of an attack or compromise. In a production SOC, an alert is a high-confidence signal indicating suspicious behavior that warrants investigation by a security analyst. We use investigative language (*"Possible port scanning detected"*, *"Possible SSH brute-force activity detected"*) rather than definitive conclusions.
+>
+> *Note: Risk scoring belongs to Day 5 and is not implemented here.*
+
+---
+
+### Detection Rules Implemented in `backend/detector.py`
+
+#### 1. Port Scanning Detection (`detect_port_scan`)
+- **Adversary Behavior**: During network reconnaissance, an attacker probes multiple ports on a server to discover active services, open doors, and vulnerable listening daemons.
+- **Detection Logic**:
+  1. Inspect normalized `network` events.
+  2. Group destination ports by `src_ip`.
+  3. Count the number of **unique** destination ports contacted by each source IP.
+  4. If unique destination ports $\ge$ `PORT_SCAN_THRESHOLD` (default: `5`), generate a `PORT_SCAN` alert.
+- **Why Unique Ports?**: Normal legitimate clients (e.g. web browsers) may send hundreds of packets, but only to 1 or 2 distinct destination ports (80 or 443). Contacting 5+ distinct service ports (21, 22, 23, 25, 80, 110, 443) in a short span strongly indicates reconnaissance.
+
+#### 2. SSH Brute-Force Detection (`detect_ssh_bruteforce`)
+- **Adversary Behavior**: An attacker uses automated tools (e.g., Hydra) to guess passwords across common or administrative accounts (`root`, `admin`, `guest`, `test`).
+- **Detection Logic**:
+  1. Inspect normalized `authentication` events.
+  2. Identify events where `action == "FAILED_LOGIN"`.
+  3. Group failure occurrences by `src_ip`.
+  4. If total failed login attempts $\ge$ `SSH_BRUTE_FORCE_THRESHOLD` (default: `5`), generate an `SSH_BRUTE_FORCE` alert.
+
+#### 3. Modular Detection Engine (`detect_events`)
+A dispatcher function that runs all registered detection rules against the normalized event stream and aggregates the resulting alerts into a clean list:
+```python
+alerts = detect_events(events)
+```
+
+---
+
+### Canonical Alert Schema
+
+In a SOC, analysts must quickly understand **why** an alert was raised. A simple `{"attack": true}` flag is useless. ThreatLens generates structured alerts containing actionable evidence:
+
+```json
+{
+    "alert_type": "PORT_SCAN",
+    "severity": "HIGH",
+    "source_ip": "10.0.0.50",
+    "description": "Possible port scanning detected",
+    "evidence": {
+        "unique_destination_ports": 7,
+        "threshold": 5
+    }
+}
+```
+
+And for brute-force attacks:
+
+```json
+{
+    "alert_type": "SSH_BRUTE_FORCE",
+    "severity": "HIGH",
+    "source_ip": "10.0.0.60",
+    "description": "Possible SSH brute-force activity detected",
+    "evidence": {
+        "failed_attempts": 8,
+        "threshold": 5
+    }
+}
+```
+
+---
+
+### False Positive Prevention & Safe Handling
+The detection engine is engineered to prevent false positives and safely handle malformed telemetry:
+- **Missing Fields**: Safely skips events missing `src_ip`, `dst_port`, `username`, or `action` without throwing exceptions.
+- **Malformed Telemetry**: Handles non-dictionary items, `None`, strings, or corrupted values gracefully.
+- **Event Type Isolation**: Port scanning rules ignore authentication events; brute-force rules ignore network firewall blocks.
+- **Threshold Safeguards**: Normal traffic (e.g., `10.0.0.5` contacting 4 ports, or `192.168.1.10` with 2 failed logins) remains below thresholds and produces **0** false alerts.
+
+---
+
+### Example Detection Output
+
+When `backend/main.py` runs, it executes the full pipeline from raw log to detection alert:
+
+```text
+========================================
+THREATLENS DAY 4 — ATTACK DETECTION
+========================================
+
+Running detection rules...
+
+[ALERT]
+Type: PORT_SCAN
+Severity: HIGH
+Source IP: 10.0.0.50
+Description: Possible port scanning detected
+
+Evidence:
+Unique destination ports: 7
+Threshold: 5
+
+----------------------------------------
+
+[ALERT]
+Type: SSH_BRUTE_FORCE
+Severity: HIGH
+Source IP: 10.0.0.60
+Description: Possible SSH brute-force activity detected
+
+Evidence:
+Failed attempts: 8
+Threshold: 5
+
+----------------------------------------
+```
+
+---
+
 ## 📂 Project Structure
 
 ```
 threatlens-learning/
 │
-├── README.md                   # 10-day roadmap, Day 1, Day 2 & Day 3 explanations
+├── README.md                   # 10-day roadmap, Day 1, 2, 3 & 4 documentation
 ├── .gitignore                  # Python bytecode and cache ignores
 │
 ├── backend/
-│   ├── __init__.py             # Module exports (Day 1, Day 2, Day 3)
+│   ├── __init__.py             # Module exports (Days 1 - 4)
 │   ├── log_parser.py           # Day 1 regex parsing (firewall & auth)
 │   ├── normalizer.py           # Day 2 canonical schema mapping & validation
 │   ├── analyzer.py             # Day 3 security event statistical analysis
-│   └── main.py                 # Multi-source pipeline demo (Parse -> Normalize -> Analyze)
+│   ├── detector.py             # Day 4 attack detection engine & rules
+│   └── main.py                 # Multi-source pipeline demo (Parse -> Normalize -> Analyze -> Detect)
 │
 ├── logs/
 │   ├── sample_auth.log         # Realistic synthetic Linux authentication logs
@@ -376,7 +513,8 @@ threatlens-learning/
     ├── __init__.py             # Test package marker
     ├── test_day1_parser.py     # Day 1 parser unit tests
     ├── test_day2_normalizer.py # Day 2 normalization unit tests
-    └── test_day3_analyzer.py   # Day 3 event analysis unit tests
+    ├── test_day3_analyzer.py   # Day 3 event analysis unit tests
+    └── test_day4_detector.py   # Day 4 attack detection unit tests
 ```
 
 ---
@@ -389,14 +527,16 @@ Make sure you have Python 3 installed. No external libraries or third-party pack
 ```bash
 python3 backend/main.py
 ```
-This executes the 3-stage pipeline:
+This executes the 4-stage pipeline:
 1. Ingests raw lines from `logs/sample_firewall.log` and `logs/sample_auth.log`.
-2. Parses each line into intermediate dictionaries and validates them.
-3. Normalizes each event into the canonical security event format.
-4. Analyzes all normalized events and outputs the **ThreatLens Day 3 Analysis** statistics report.
+2. Parses each line into intermediate dictionaries and validates them (Day 1).
+3. Normalizes each event into the canonical security event format (Day 2).
+4. Analyzes all normalized events and outputs the **ThreatLens Day 3 Analysis** statistics report (Day 3).
+5. Evaluates normalized events against detection rules and outputs **ThreatLens Day 4 Attack Detection** alerts with evidence (Day 4).
 
 ### 2. Run All Automated Unit Tests
 ```bash
 python3 -m unittest discover -s tests -v
 ```
-Runs all 21 unit tests across Day 1 (parsing), Day 2 (normalization), and Day 3 (security event analysis).
+Runs all 34 unit tests across Day 1 (parsing), Day 2 (normalization), Day 3 (analysis), and Day 4 (attack detection).
+

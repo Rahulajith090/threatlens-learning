@@ -1,6 +1,6 @@
 """
-ThreatLens Learning Journey - Day 3: Main Ingestion, Normalization & Analysis Script
-===================================================================================
+ThreatLens Learning Journey - Day 4: Main Ingestion, Normalization, Analysis & Detection Script
+=============================================================================================
 
 This script demonstrates the end-to-end security log processing pipeline:
 
@@ -17,10 +17,14 @@ NORMALIZED EVENT
 DAY 3 ANALYZER (Statistical aggregation & summarization)
    ↓
 SECURITY STATISTICS
+   ↓
+DAY 4 DETECTOR (Suspicious pattern & threshold matching)
+   ↓
+SECURITY ALERTS
 
 CRITICAL SOC DISTINCTION:
   - ANALYSIS (Day 3): Answers "What is happening?" by summarizing statistics.
-  - DETECTION (Day 4): Answers "Does this match an attack pattern?"
+  - DETECTION (Day 4): Answers "Does this match an attack pattern?" and generates alerts.
 
 How to run:
     python3 backend/main.py
@@ -38,6 +42,7 @@ if current_dir not in sys.path:
 from log_parser import parse_log, parse_auth_log
 from normalizer import normalize_firewall_event, normalize_auth_event
 from analyzer import format_analysis_report
+from detector import detect_events, format_detection_report
 
 
 def process_firewall_logs(log_file_path):
@@ -170,10 +175,17 @@ def main():
 
     # Day 3: Security Event Analysis
     # Note: We analyze what happened across all normalized events.
-    # We do NOT detect attacks here — detection belongs to Day 4.
+    # Analysis observes activity without deciding if it is malicious.
     all_events = fw_events + auth_events
     print("\n" + format_analysis_report(all_events))
+
+    # Day 4: Attack Detection
+    # Evaluates normalized events against detection rules to flag suspicious behavior.
+    # Detection looks for attack patterns (e.g. port scanning, SSH brute force).
+    alerts = detect_events(all_events)
+    print("\n" + format_detection_report(alerts))
 
 
 if __name__ == "__main__":
     main()
+
